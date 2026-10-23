@@ -1,0 +1,15 @@
+# ビルド成果物
+build/
+.gradle/
+out/
+desktop/out/
+# 同梱ツール (desktop/fetch-tools.ps1 で取得)
+desktop/vendor/
+desktop/res/
+# 署名鍵・ローカル設定 (絶対に公開しない)
+*.jks
+*.keystore
+keystore.properties
+local.properties
+.idea/
+*.iml
