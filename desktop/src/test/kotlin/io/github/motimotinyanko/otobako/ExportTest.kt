@@ -8,6 +8,7 @@ import io.github.motimotinyanko.otobako.engine.Engine
 import io.github.motimotinyanko.otobako.engine.Exporter
 import io.github.motimotinyanko.otobako.engine.LocalMp3
 import io.github.motimotinyanko.otobako.engine.Thumbs
+import io.github.motimotinyanko.otobako.engine.VideoImport
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import java.io.File
@@ -55,6 +56,45 @@ class ExportTest {
         // 89dB 目標で -20dB の正弦波は大きく持ち上がるはず
         val vol = runBlocking { Engine.ffmpeg(listOf("-hide_banner", "-i", f.path, "-af", "volumedetect", "-f", "null", "-")) }
         println(vol.log.filter { it.contains("mean_volume") || it.contains("max_volume") })
+    }
+
+    @Test
+    fun videoToMp3() = runBlocking {
+        val lib = File(work, "videos").apply { mkdirs() }
+        val out = File(work, "out3").apply { mkdirs() }
+        val video = File(lib, "旅の記録.mp4")
+        ff("-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=12", "-f", "lavfi", "-i", "sine=frequency=500:duration=12",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-metadata", "title=動画のタイトル", video.path)
+        val before = video.readBytes().contentHashCode()
+        val dir = File(work, "vid").apply { mkdirs() }
+        val info = LocalMp3.probe(video)
+        println("video probe: $info")
+        assertEquals("aac", info.codec)
+        val audio = File(dir, "audio.mka")
+        VideoImport.extractAudio(video, audio)
+        val size = VideoImport.grabFrame(video, File(dir, "thumb.jpg"), info.duration)
+        println("frame: $size")
+        assertEquals(1920 to 1080, size)
+        val t = Track(
+            id = "v1", url = video.path, addedAt = 0, audioFile = audio.name, duration = info.duration,
+            sourceFile = video.path, localName = video.name, thumbW = 1920, thumbH = 1080, bitrate = 256,
+            tags = info.tags.copy(artist = "旅人"),
+        )
+        val msg = Exporter.export(t, dir, AppSettings(outputDir = out.path)) { _, _ -> }
+        println("video: $msg")
+        val mp3 = File(out, "動画のタイトル - 旅人.mp3")
+        assertTrue(mp3.exists(), "mp3 が保存先に無い: ${out.list()?.toList()}")
+        val p = probe(mp3)
+        val streams = p.getJSONArray("streams")
+        val a = (0 until streams.length()).map { streams.getJSONObject(it) }.first { it.getString("codec_type") == "audio" }
+        assertEquals("mp3", a.getString("codec_name"))
+        assertEquals("256000", a.getString("bit_rate"))
+        val art = (0 until streams.length()).map { streams.getJSONObject(it) }.firstOrNull { it.getString("codec_type") == "video" }
+        assertTrue(art != null && art.getInt("width") == 1080 && art.getInt("height") == 1080, "中央の正方形アートワークが無い")
+        assertEquals(12.0, p.getJSONObject("format").getString("duration").toDouble(), 0.2)
+        // 元の動画は変更しない
+        assertEquals(before, video.readBytes().contentHashCode())
+        assertEquals(listOf("旅の記録.mp4"), lib.list()?.toList())
     }
 
     @Test

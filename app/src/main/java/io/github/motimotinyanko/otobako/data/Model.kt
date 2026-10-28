@@ -66,6 +66,8 @@ data class Track(
     /** 端末内の mp3 から追加した場合の元ファイル (SAF のドキュメント URI) */
     val localUri: String? = null,
     val localName: String? = null,
+    /** 端末内の動画 (mp4 等) から音声を取り出して作る曲の元ファイル。元ファイルは変えず、mp3 は保存先に新しく作る */
+    val sourceFile: String? = null,
 
     // 編集内容
     val edited: Boolean = false,
@@ -86,6 +88,7 @@ data class Track(
     val outLength get() = (endOrDuration - trimStart).coerceAtLeast(0.0)
     val isTrimmed get() = trimStart > 0.05 || (trimEnd > 0 && trimEnd < duration - 0.05)
     val isLocal get() = localUri != null
+    val isVideoImport get() = sourceFile != null
     /** 端末内の mp3 で、再エンコードせずに保存できる (フェード無し・ビットレート元のまま) */
     val isLossless get() = isLocal && bitrate == 0 && fadeIn <= 0 && fadeOut <= 0
 
@@ -98,7 +101,7 @@ data class Track(
         .put("audioFile", audioFile).put("thumbW", thumbW).put("thumbH", thumbH)
         .put("artVersion", artVersion)
         .put("crop", crop?.let { JSONObject().put("x", it.x).put("y", it.y).put("size", it.size) })
-        .put("localUri", localUri).put("localName", localName)
+        .put("localUri", localUri).put("localName", localName).put("sourceFile", sourceFile)
         .put("accent", accent).put("edited", edited).put("bitrate", bitrate)
         .put("tags", tags.toJson())
         .put("trimStart", trimStart).put("trimEnd", trimEnd)
@@ -127,6 +130,7 @@ data class Track(
             crop = o.optJSONObject("crop")?.let { CropRect(it.optInt("x"), it.optInt("y"), it.optInt("size")) },
             localUri = o.optStringOrNull("localUri"),
             localName = o.optStringOrNull("localName"),
+            sourceFile = o.optStringOrNull("sourceFile"),
             accent = o.optInt("accent"),
             edited = o.optBoolean("edited"),
             bitrate = o.optInt("bitrate", 320),
@@ -152,6 +156,7 @@ fun siteOf(url: String): String {
         host.endsWith("nicovideo.jp") || host == "nico.ms" -> "ニコニコ"
         host.endsWith("soundcloud.com") || host == "on.soundcloud.com" -> "SoundCloud"
         host.endsWith("twitter.com") || host == "x.com" || host.endsWith(".x.com") -> "X"
+        host.endsWith("tiktok.com") -> "TikTok"
         else -> host.removePrefix("www.")
     }
 }
@@ -163,3 +168,6 @@ fun formatTime(sec: Double, tenths: Boolean = false): String {
     return if (tenths) "%d:%04.1f".format(java.util.Locale.US, m, r)
     else "%d:%02d".format(java.util.Locale.US, m, r.toInt())
 }
+
+/** 音声を取り出して mp3 にできる動画ファイルの拡張子 */
+val VIDEO_EXTS = setOf("mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "ts", "flv", "wmv")

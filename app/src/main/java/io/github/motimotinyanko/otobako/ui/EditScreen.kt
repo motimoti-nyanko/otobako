@@ -215,6 +215,7 @@ private fun SourceCard(t: Track) {
         Text(t.sourceTitle, color = C.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(
             if (t.isLocal) "端末内のファイル · ${t.localName.orEmpty()} · ${formatTime(t.duration)}"
+            else if (t.isVideoImport) "端末内の動画から変換 · ${t.localName.orEmpty()} · ${formatTime(t.duration)}"
             else "${t.uploader} · ${t.site} · ${formatTime(t.duration)}",
             color = C.Sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )

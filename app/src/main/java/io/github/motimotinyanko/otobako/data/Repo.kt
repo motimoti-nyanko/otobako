@@ -11,6 +11,7 @@ import io.github.motimotinyanko.otobako.engine.Exporter
 import io.github.motimotinyanko.otobako.engine.LocalMp3
 import io.github.motimotinyanko.otobako.engine.SourceInfo
 import io.github.motimotinyanko.otobako.engine.Thumbs
+import io.github.motimotinyanko.otobako.engine.VideoImport
 import io.github.motimotinyanko.otobako.engine.Waveform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -121,28 +122,80 @@ class Repo(private val app: Context) {
     fun hasUrl(u: String) = _tracks.value.any { normalize(it.url) == normalize(u) }
 
     /** 端末内の mp3 を追加 (複数可)。元ファイルは書き出し時に上書きする */
+    /**
+     * 端末内のファイルを追加 (複数可)。
+     * mp3 は編集して元のファイルを上書き、動画 (mp4 等) は音声を取り出して新しい mp3 を保存先に作る
+     */
     fun addLocal(uris: List<Uri>) {
         if (uris.isEmpty()) return
-        val have = _tracks.value.mapNotNull { it.localUri }.toSet()
+        val have = _tracks.value.flatMap { listOfNotNull(it.localUri, it.sourceFile) }.toSet()
         val fresh = uris.filter { it.toString() !in have }
         if (fresh.isEmpty()) { say("すでに追加済みです"); return }
         val now = System.currentTimeMillis()
+        val bitrate = settings.state.value.bitrate
         val added = fresh.mapIndexed { i, u ->
-            // 書き出し時に上書きできるよう、読み書きの権限を保持しておく
-            runCatching {
-                app.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }.recoverCatching { app.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             val name = DocumentFile.fromSingleUri(app, u)?.name ?: "audio.mp3"
-            Track(
-                id = UUID.randomUUID().toString().take(12), url = u.toString(), addedAt = now + i,
-                site = "端末", localUri = u.toString(), localName = name,
-                sourceTitle = name.substringBeforeLast('.'), bitrate = 0, edited = true,
-                status = Status.PROCESSING, stage = "読み込み中",
-            )
+            val mime = runCatching { app.contentResolver.getType(u) }.getOrNull().orEmpty()
+            val isVideo = mime.startsWith("video/") || name.substringAfterLast('.', "").lowercase() in VIDEO_EXTS
+            if (isVideo) {
+                // 動画は読むだけ (元のファイルは変えない)
+                runCatching { app.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                Track(
+                    id = UUID.randomUUID().toString().take(12), url = u.toString(), addedAt = now + i,
+                    site = "動画", sourceFile = u.toString(), localName = name,
+                    sourceTitle = name.substringBeforeLast('.'), bitrate = bitrate,
+                    status = Status.PROCESSING, stage = "読み込み中",
+                )
+            } else {
+                // 書き出し時に上書きできるよう、読み書きの権限を保持しておく
+                runCatching {
+                    app.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                }.recoverCatching { app.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                Track(
+                    id = UUID.randomUUID().toString().take(12), url = u.toString(), addedAt = now + i,
+                    site = "端末", localUri = u.toString(), localName = name,
+                    sourceTitle = name.substringBeforeLast('.'), bitrate = 0, edited = true,
+                    status = Status.PROCESSING, stage = "読み込み中",
+                )
+            }
         }
         _tracks.update { added.reversed() + it }
         added.forEach { t -> scope.launch { save(t.id) }; startDownload(t.id) }
         if (uris.size > fresh.size) say("${fresh.size}曲追加 (${uris.size - fresh.size}曲は追加済み)")
+    }
+
+    /** 動画から音声を無変換で取り出し、1 コマをサムネイルにする (mp3 化は書き出し時に 1 回だけ) */
+    private suspend fun runVideoImport(id: String) {
+        val t = get(id) ?: return
+        val d = dir(id).apply { mkdirs() }
+        update(id, persist = false) { it.copy(status = Status.PROCESSING, stage = "動画を読み込み中") }
+        // ffmpeg は content:// を直接読めないので一時ファイルにコピーしてから処理し、終わったら消す
+        val ext = t.localName?.substringAfterLast('.', "mp4")?.ifEmpty { "mp4" } ?: "mp4"
+        val tmp = File(app.cacheDir, "video_$id.$ext")
+        try {
+            LocalMp3.copyIn(app, Uri.parse(t.sourceFile), tmp)
+            val info = LocalMp3.probe(tmp)
+            update(id, persist = false) { it.copy(stage = "音声を取り出し中") }
+            val audio = File(d, "audio.mka")
+            VideoImport.extractAudio(tmp, audio)
+            update(id) {
+                it.copy(
+                    audioFile = audio.name, duration = info.duration, sourceCodec = info.codec, sourceAbr = info.bitrate,
+                    tags = if (it.edited) it.tags else info.tags.copy(title = info.tags.title.ifBlank { it.sourceTitle }),
+                    uploader = info.tags.artist,
+                )
+            }
+            update(id, persist = false) { it.copy(stage = "サムネイルを作成中") }
+            VideoImport.grabFrame(tmp, File(d, "thumb.jpg"), info.duration)?.let { (w, h) ->
+                val accent = runCatching { Thumbs.accentOf(File(d, "thumb.jpg")) }.getOrDefault(0)
+                update(id) { it.copy(thumbW = w, thumbH = h, accent = accent) }
+            }
+        } finally {
+            tmp.delete()
+        }
+        update(id, persist = false) { it.copy(stage = "波形を作成中") }
+        runCatching { Waveform.build(File(d, "audio.mka"), File(d, "wave.bin")) }
+        update(id) { it.copy(status = Status.READY, stage = "", progress = 1f) }
     }
 
     private suspend fun runImport(id: String) {
@@ -186,7 +239,12 @@ class Repo(private val app: Context) {
             try {
                 update(id) { it.copy(status = Status.QUEUED, error = null, progress = 0f, stage = "待機中") }
                 slots.withPermit {
-                    if (get(id)?.isLocal == true) runImport(id) else { updating?.join(); runDownload(id) }
+                    val t = get(id)
+                    when {
+                        t?.isLocal == true -> runImport(id)
+                        t?.isVideoImport == true -> runVideoImport(id)
+                        else -> { updating?.join(); runDownload(id) }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

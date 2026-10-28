@@ -237,7 +237,7 @@ private fun PasteBar(repo: Repo, bitrate: Int) {
             }
         }
         Spacer(Modifier.width(8.dp))
-        // PC 内の mp3 を選ぶ (複数可。フォルダごとドラッグ & ドロップでも追加できる)
+        // PC 内の mp3 (編集して上書き) や動画 (mp3 に変換) を選ぶ (複数可。ドラッグ & ドロップでも追加できる)
         val pickMp3 = { repo.addLocal(Desk.pickMp3Files()) }
         Box(
             Modifier
@@ -247,7 +247,7 @@ private fun PasteBar(repo: Repo, bitrate: Int) {
                 .border(1.dp, C.Line, RoundedCornerShape(18.dp))
                 .clickable { pickMp3() },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Rounded.FolderOpen, "PC 内の mp3 を追加", tint = C.Text, modifier = Modifier.size(24.dp)) }
+        ) { Icon(Icons.Rounded.FolderOpen, "PC 内の mp3・動画を追加", tint = C.Text, modifier = Modifier.size(24.dp)) }
         Spacer(Modifier.width(8.dp))
         // 新しく追加する曲のビットレート
         Box {
@@ -319,15 +319,15 @@ private fun EmptyState() {
         Text("曲を追加しましょう", color = C.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "動画サイトの曲も、PC 内の mp3 も、ここにいったん保留されます。\nタグ・アートワーク・長さを整えたら、音量をそろえてまとめて保存できます。",
+            "動画サイトの曲も、PC 内の mp3 や動画も、ここにいったん保留されます。\nタグ・アートワーク・長さを整えたら、音量をそろえてまとめて保存できます。",
             color = C.Sub, fontSize = 13.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
         // 追加のしかた 3 通り
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            HowTo(Icons.Rounded.ContentPaste, "リンクを貼り付け (Ctrl+V)", "YouTube・ニコニコ動画・SoundCloud・X")
-            HowTo(Icons.Rounded.FolderOpen, "PC 内の mp3 を選ぶ", "複数まとめて選べます。保存時は元のファイルを上書き")
-            HowTo(Icons.Rounded.Share, "ウィンドウへドラッグ & ドロップ", "mp3・フォルダ・ブラウザのリンクをそのまま追加")
+            HowTo(Icons.Rounded.ContentPaste, "リンクを貼り付け (Ctrl+V)", "YouTube・ニコニコ動画・SoundCloud・X・TikTok")
+            HowTo(Icons.Rounded.FolderOpen, "PC 内の mp3・動画を選ぶ", "mp3 は編集して上書き、mp4 などの動画は mp3 に変換")
+            HowTo(Icons.Rounded.Share, "ウィンドウへドラッグ & ドロップ", "mp3・動画・フォルダ・ブラウザのリンクをそのまま追加")
         }
     }
 }
@@ -400,13 +400,13 @@ private fun TrackCard(repo: Repo, t: Track, selected: Boolean, modifier: Modifie
                         text = { Text("再試行") }, leadingIcon = { Icon(Icons.Rounded.Refresh, null) },
                         onClick = { menu = false; repo.retry(t.id) },
                     )
-                    if (!t.isLocal) DropdownMenuItem(
+                    if (!t.isLocal && !t.isVideoImport) DropdownMenuItem(
                         text = { Text("元のページを開く") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
                         onClick = { menu = false; Desk.browse(t.webpageUrl.ifEmpty { t.url }) },
                     )
-                    if (t.isLocal) DropdownMenuItem(
+                    if (t.isLocal || t.isVideoImport) DropdownMenuItem(
                         text = { Text("エクスプローラーで表示") }, leadingIcon = { Icon(Icons.Rounded.FolderOpen, null) },
-                        onClick = { menu = false; t.localUri?.let { Desk.reveal(File(it)) } },
+                        onClick = { menu = false; (t.localUri ?: t.sourceFile)?.let { Desk.reveal(File(it)) } },
                     )
                     DropdownMenuItem(
                         text = { Text("削除", color = C.Danger) },

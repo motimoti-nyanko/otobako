@@ -9,7 +9,7 @@ import java.nio.file.StandardCopyOption
 
 /** PC 内の mp3 の読み込みと上書き */
 object LocalMp3 {
-    data class Info(val duration: Double, val bitrate: Double, val tags: Tags)
+    data class Info(val duration: Double, val bitrate: Double, val tags: Tags, val codec: String = "")
 
     /** 元ファイルをアプリ内の作業用コピー (dir/audio.mp3) にする */
     fun copyIn(src: File, out: File) {
@@ -27,14 +27,19 @@ object LocalMp3 {
         val tags = tagsJson.keys().asSequence().associate { it.lowercase() to tagsJson.optString(it) }
         val streams = o.optJSONArray("streams")
         var abr = 0.0
+        var codec = ""
         for (i in 0 until (streams?.length() ?: 0)) {
             val s = streams!!.getJSONObject(i)
-            if (s.optString("codec_type") == "audio") abr = s.optString("bit_rate").toDoubleOrNull()?.div(1000) ?: 0.0
+            if (s.optString("codec_type") == "audio" && codec.isEmpty()) {
+                abr = s.optString("bit_rate").toDoubleOrNull()?.div(1000) ?: 0.0
+                codec = s.optString("codec_name")
+            }
         }
         if (abr == 0.0) abr = format.optString("bit_rate").toDoubleOrNull()?.div(1000) ?: 0.0
         return Info(
             duration = format.optString("duration").toDoubleOrNull() ?: 0.0,
             bitrate = abr,
+            codec = codec,
             tags = Tags(
                 title = tags["title"].orEmpty(),
                 artist = tags["artist"].orEmpty(),
@@ -220,5 +225,33 @@ object Mp3Gain {
         val size = ((h[6].toInt() and 0x7F) shl 21) or ((h[7].toInt() and 0x7F) shl 14) or ((h[8].toInt() and 0x7F) shl 7) or (h[9].toInt() and 0x7F)
         val footer = if (h[5].toInt() and 0x10 != 0) 10 else 0
         return 10L + size + footer
+    }
+}
+
+/** PC 内の動画 (mp4 等) から音声とサムネイルを取り出す */
+object VideoImport {
+    /** 映像を捨てて音声だけを無変換で取り出す (どのコーデックでも入る Matroska に入れる) */
+    suspend fun extractAudio(video: File, out: File) {
+        val r = Engine.ffmpeg(listOf("-hide_banner", "-nostdin", "-y", "-i", video.path, "-map", "0:a:0", "-vn", "-sn", "-dn", "-c:a", "copy", out.path))
+        if (!r.ok || out.length() == 0L) {
+            out.delete()
+            error(if (r.log.any { it.contains("matches no streams") }) "音声が入っていない動画です" else "音声を取り出せませんでした\n${r.tail(2)}")
+        }
+    }
+
+    /** 動画の 1 コマ (全体の 10% の位置) を thumb.jpg にする。短辺は 1080 まで。@return (幅, 高さ) */
+    suspend fun grabFrame(video: File, out: File, duration: Double): Pair<Int, Int>? {
+        out.delete()
+        val at = if (duration > 4) duration * 0.1 else 0.0
+        val r = Engine.ffmpeg(
+            listOf(
+                "-hide_banner", "-nostdin", "-y", "-ss", String.format(java.util.Locale.US, "%.2f", at), "-i", video.path,
+                "-frames:v", "1", "-vf", "scale='if(lte(iw,ih),min(iw,1080),-2)':'if(lte(iw,ih),-2,min(ih,1080))'",
+                "-q:v", "2", "-update", "1", out.path,
+            )
+        )
+        if (!r.ok || out.length() == 0L) { out.delete(); return null }
+        val img = Imaging.decode(out) ?: run { out.delete(); return null }
+        return img.width to img.height
     }
 }

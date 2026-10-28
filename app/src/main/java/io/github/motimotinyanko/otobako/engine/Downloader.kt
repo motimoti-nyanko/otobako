@@ -132,6 +132,8 @@ object Downloader {
         return when {
             msg.contains("Unsupported URL", true) -> "対応していないリンクです"
             msg.contains("Private video", true) -> "非公開の動画です"
+            msg.contains("IP address is blocked", true) || msg.contains("not available in your country", true) ||
+                msg.contains("geo restrict", true) -> "この投稿はお住まいの地域からは見られません"
             msg.contains("Sign in to confirm your age", true) -> "年齢制限のある動画です (ログインが必要)"
             msg.contains("Sign in", true) || msg.contains("login", true) -> "ログインが必要な動画です"
             msg.contains("Video unavailable", true) -> "動画が見つかりません (削除・非公開など)"

@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
         clipSuggestion.value = if (url != dismissedClip && !repo.hasUrl(url) && isSupported(url)) url else null
     }
 
-    private fun isSupported(u: String) = listOf("youtube.com", "youtu.be", "nicovideo.jp", "nico.ms", "soundcloud.com", "twitter.com", "x.com")
+    private fun isSupported(u: String) = listOf("youtube.com", "youtu.be", "nicovideo.jp", "nico.ms", "soundcloud.com", "twitter.com", "x.com", "tiktok.com")
         .any { u.contains(it, ignoreCase = true) }
 }
 

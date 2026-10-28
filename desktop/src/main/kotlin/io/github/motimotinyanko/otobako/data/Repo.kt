@@ -6,6 +6,7 @@ import io.github.motimotinyanko.otobako.engine.Exporter
 import io.github.motimotinyanko.otobako.engine.LocalMp3
 import io.github.motimotinyanko.otobako.engine.SourceInfo
 import io.github.motimotinyanko.otobako.engine.Thumbs
+import io.github.motimotinyanko.otobako.engine.VideoImport
 import io.github.motimotinyanko.otobako.engine.Waveform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -120,19 +121,31 @@ class Repo {
     fun hasUrl(u: String) = _tracks.value.any { normalize(it.url) == normalize(u) }
 
     /** PC 内の mp3 を追加 (複数可・フォルダを渡すと中の mp3 を全部)。元ファイルは書き出し時に上書きする */
+    /**
+     * PC 内のファイルを追加 (複数可)。mp3 は編集して元のファイルを上書き、
+     * 動画 (mp4 等) は音声を取り出して新しい mp3 を保存先に作る。フォルダは中の mp3 だけを追加
+     */
     fun addLocal(files: List<File>) {
-        val mp3s = files.flatMap { f ->
-            if (f.isDirectory) f.walkTopDown().filter { it.isFile && it.extension.equals("mp3", true) }.sortedBy { it.path }.toList()
+        fun isMp3(f: File) = f.extension.equals("mp3", true)
+        fun isVideo(f: File) = f.extension.lowercase() in VIDEO_EXTS
+        val picked = files.flatMap { f ->
+            if (f.isDirectory) f.walkTopDown().filter { it.isFile && isMp3(it) }.sortedBy { it.path }.toList()
             else listOf(f)
-        }.filter { it.isFile && it.extension.equals("mp3", true) }.map { it.absoluteFile }
-        if (mp3s.isEmpty()) { if (files.isNotEmpty()) say("mp3 ファイルが見つかりません"); return }
-        val have = _tracks.value.mapNotNull { it.localUri }.toSet()
-        val fresh = mp3s.filter { it.path !in have }
+        }.filter { it.isFile && (isMp3(it) || isVideo(it)) }.map { it.absoluteFile }
+        if (picked.isEmpty()) { if (files.isNotEmpty()) say("mp3 / 動画ファイルが見つかりません"); return }
+        val have = _tracks.value.flatMap { listOfNotNull(it.localUri, it.sourceFile) }.toSet()
+        val fresh = picked.filter { it.path !in have }
         if (fresh.isEmpty()) { say("すでに追加済みです"); return }
         val now = System.currentTimeMillis()
+        val bitrate = settings.state.value.bitrate
         val added = fresh.mapIndexed { i, f ->
             val name = f.name
-            Track(
+            if (isVideo(f)) Track(
+                id = UUID.randomUUID().toString().take(12), url = f.path, addedAt = now + i,
+                site = "動画", sourceFile = f.path, localName = name,
+                sourceTitle = name.substringBeforeLast('.'), bitrate = bitrate,
+                status = Status.PROCESSING, stage = "読み込み中",
+            ) else Track(
                 id = UUID.randomUUID().toString().take(12), url = f.path, addedAt = now + i,
                 site = "PC", localUri = f.path, localName = name,
                 sourceTitle = name.substringBeforeLast('.'), bitrate = 0, edited = true,
@@ -141,7 +154,35 @@ class Repo {
         }
         _tracks.update { added.reversed() + it }
         added.forEach { t -> scope.launch { save(t.id) }; startDownload(t.id) }
-        if (mp3s.size > fresh.size) say("${fresh.size}曲追加 (${mp3s.size - fresh.size}曲は追加済み)")
+        if (picked.size > fresh.size) say("${fresh.size}曲追加 (${picked.size - fresh.size}曲は追加済み)")
+    }
+
+    /** 動画から音声を無変換で取り出し、1 コマをサムネイルにする (mp3 化は書き出し時に 1 回だけ) */
+    private suspend fun runVideoImport(id: String) {
+        val t = get(id) ?: return
+        val d = dir(id).apply { mkdirs() }
+        val src = File(t.sourceFile!!)
+        if (!src.exists()) error("動画ファイルが見つかりません")
+        update(id, persist = false) { it.copy(status = Status.PROCESSING, stage = "動画を読み込み中") }
+        val info = LocalMp3.probe(src)
+        update(id, persist = false) { it.copy(stage = "音声を取り出し中") }
+        val audio = File(d, "audio.mka")
+        VideoImport.extractAudio(src, audio)
+        update(id) {
+            it.copy(
+                audioFile = audio.name, duration = info.duration, sourceCodec = info.codec, sourceAbr = info.bitrate,
+                tags = if (it.edited) it.tags else info.tags.copy(title = info.tags.title.ifBlank { it.sourceTitle }),
+                uploader = info.tags.artist,
+            )
+        }
+        update(id, persist = false) { it.copy(stage = "サムネイルを作成中") }
+        VideoImport.grabFrame(src, File(d, "thumb.jpg"), info.duration)?.let { (w, h) ->
+            val accent = runCatching { Thumbs.accentOf(File(d, "thumb.jpg")) }.getOrDefault(0)
+            update(id) { it.copy(thumbW = w, thumbH = h, accent = accent) }
+        }
+        update(id, persist = false) { it.copy(stage = "波形を作成中") }
+        runCatching { Waveform.build(audio, File(d, "wave.bin")) }
+        update(id) { it.copy(status = Status.READY, stage = "", progress = 1f) }
     }
 
     private suspend fun runImport(id: String) {
@@ -185,7 +226,12 @@ class Repo {
             try {
                 update(id) { it.copy(status = Status.QUEUED, error = null, progress = 0f, stage = "待機中") }
                 slots.withPermit {
-                    if (get(id)?.isLocal == true) runImport(id) else { updating?.join(); runDownload(id) }
+                    val t = get(id)
+                    when {
+                        t?.isLocal == true -> runImport(id)
+                        t?.isVideoImport == true -> runVideoImport(id)
+                        else -> { updating?.join(); runDownload(id) }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

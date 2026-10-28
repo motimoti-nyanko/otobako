@@ -1,5 +1,6 @@
 package io.github.motimotinyanko.otobako.ui
 
+import io.github.motimotinyanko.otobako.data.VIDEO_EXTS
 import java.awt.Desktop
 import java.awt.FileDialog
 import java.awt.Frame
@@ -19,12 +20,12 @@ object Desk {
         Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
     }.getOrNull()
 
-    /** mp3 を複数選ぶ (Windows 標準のファイル選択画面) */
+    /** mp3 と動画を複数選ぶ (Windows 標準のファイル選択画面) */
     fun pickMp3Files(): List<File> {
-        val d = FileDialog(window, "mp3 を選ぶ (複数選択できます)", FileDialog.LOAD)
+        val d = FileDialog(window, "mp3 または動画を選ぶ (複数選択できます)", FileDialog.LOAD)
         d.isMultipleMode = true
-        d.file = "*.mp3"
-        d.setFilenameFilter { _, name -> name.endsWith(".mp3", true) }
+        d.file = (listOf("mp3") + VIDEO_EXTS).joinToString(";") { "*.$it" }
+        d.setFilenameFilter { _, name -> name.substringAfterLast('.', "").lowercase().let { it == "mp3" || it in VIDEO_EXTS } }
         d.isVisible = true
         return d.files.orEmpty().toList()
     }

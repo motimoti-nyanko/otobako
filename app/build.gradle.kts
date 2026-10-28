@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.motimotinyanko.otobako"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         // yt-dlp (Python) と ffmpeg の実行ファイルが ABI ごとに 30MB 以上あるので 64bit ARM だけ同梱
         ndk { abiFilters += listOf("arm64-v8a") }
     }

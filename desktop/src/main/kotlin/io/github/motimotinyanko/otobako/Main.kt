@@ -84,7 +84,7 @@ private sealed interface Right {
     data object Settings : Right
 }
 
-private val SUPPORTED = listOf("youtube.com", "youtu.be", "nicovideo.jp", "nico.ms", "soundcloud.com", "twitter.com", "x.com")
+private val SUPPORTED = listOf("youtube.com", "youtu.be", "nicovideo.jp", "nico.ms", "soundcloud.com", "twitter.com", "x.com", "tiktok.com")
 
 /** コマンドライン引数 / 2 回目の起動で渡されたもの: ファイル・フォルダは mp3 として、それ以外はリンクとして追加 */
 private fun Repo.handleArgs(args: List<String>) {
@@ -286,7 +286,7 @@ private fun Placeholder() {
         Spacer(Modifier.height(18.dp))
         Text("左の一覧から曲を選ぶと、ここで編集できます", color = C.Sub, fontSize = 15.sp)
         Spacer(Modifier.height(6.dp))
-        Text("Ctrl+V でリンクを追加 · mp3 やフォルダはウィンドウへドラッグ & ドロップ", color = C.Faint, fontSize = 12.sp)
+        Text("Ctrl+V でリンクを追加 · mp3・動画・フォルダはウィンドウへドラッグ & ドロップ", color = C.Faint, fontSize = 12.sp)
     }
 }
 

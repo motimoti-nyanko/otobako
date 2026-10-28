@@ -27,7 +27,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "Otobako"
-            packageVersion = "1.0.0"
+            packageVersion = "1.1.0"
             description = "動画サイトの曲と mp3 をタグ・アートワーク・音量まで整えて保存"
             vendor = "Otobako"
             modules("java.desktop", "java.prefs", "jdk.unsupported", "jdk.crypto.ec", "java.net.http")
